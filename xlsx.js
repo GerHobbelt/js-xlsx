@@ -7389,7 +7389,7 @@ function write_ws_xml_cols(ws, cols) {
 
 function write_ws_xml_cell(cell, ref, ws, opts, idx, wb) {
 	if(cell.f) {cell.v = 0;}
-        if(cell.v === undefined) return "";
+    if(cell.v === undefined) return "";
 	var vv = "";
 	var oldt = cell.t, oldv = cell.v;
 	switch(cell.t) {
@@ -7423,7 +7423,7 @@ function write_ws_xml_cell(cell, ref, ws, opts, idx, wb) {
 			o.t = "str"; break;
 	}
 	if(cell.t != oldt) { cell.t = oldt; cell.v = oldv; }
-        if(cell.f) { v = writetag('f', escapexml(cell.f)) +  v;}
+    if(cell.f) { v = writetag('f', escapexml(cell.f)) +  v;}
 	return writextag('c', v, o);
 }
 
@@ -11280,6 +11280,7 @@ function add_rels(rels, rId, f, type, relobj) {
 }
 
 function write_zip(wb, opts) {
+    var isOverwritingSheets = opts.overwriteSheets && opts.overwriteSheets.length;
 	if(wb && !wb.SSF) {
 		wb.SSF = SSF.get_table();
 	}
@@ -11294,14 +11295,17 @@ function write_zip(wb, opts) {
 		coreprops: [], extprops: [], custprops: [], strs:[], comments: [], vba: [],
 		TODO:[], rels:[], xmlns: "" };
 	fix_write_opts(opts = opts || {});
-	var zip = new jszip();
-	var f = "", rId = 0;
 
-	opts.cellXfs = [];
+	var f = "", rId = 0;
+    var zip = !isOverwritingSheets ?new jszip() : new jszip(_fs.readFileSync(opts.file))
+
+
+    opts.cellXfs = [];
 	get_cell_style(opts.cellXfs, {}, {revssf:{"General":0}});
 
 	f = "docProps/core.xml";
-	zip.file(f, write_core_props(wb.Props, opts));
+    if(!isOverwritingSheets)
+	    zip.file(f, write_core_props(wb.Props, opts));
 	ct.coreprops.push(f);
 	add_rels(opts.rels, 2, f, RELS.CORE_PROPS);
 
@@ -11309,32 +11313,38 @@ function write_zip(wb, opts) {
 	if(!wb.Props) wb.Props = {};
 	wb.Props.SheetNames = wb.SheetNames;
 	wb.Props.Worksheets = wb.SheetNames.length;
-	zip.file(f, write_ext_props(wb.Props, opts));
+    if(!isOverwritingSheets)
+	    zip.file(f, write_ext_props(wb.Props, opts));
 	ct.extprops.push(f);
 	add_rels(opts.rels, 3, f, RELS.EXT_PROPS);
 
 	if(wb.Custprops !== wb.Props && keys(wb.Custprops||{}).length > 0) {
 		f = "docProps/custom.xml";
-		zip.file(f, write_cust_props(wb.Custprops, opts));
+        if(!isOverwritingSheets)
+            zip.file(f, write_cust_props(wb.Custprops, opts));
 		ct.custprops.push(f);
 		add_rels(opts.rels, 4, f, RELS.CUST_PROPS);
 	}
 
 	f = "xl/workbook." + wbext;
-	zip.file(f, write_wb(wb, f, opts));
+    if(!isOverwritingSheets)
+        zip.file(f, write_wb(wb, f, opts));
 	ct.workbooks.push(f);
 	add_rels(opts.rels, 1, f, RELS.WB);
 
 	for(rId=1;rId <= wb.SheetNames.length; ++rId) {
 		f = "xl/worksheets/sheet" + rId + "." + wbext;
-		zip.file(f, write_ws(rId-1, f, opts, wb));
-		ct.sheets.push(f);
+        if (!isOverwritingSheets || opts.overwriteSheets.indexOf(wb.SheetNames[rId-1]) > -1) {
+          zip.file(f, write_ws(rId-1, f, opts, wb));
+        }
+        ct.sheets.push(f);
 		add_rels(opts.wbrels, rId, "worksheets/sheet" + rId + "." + wbext, RELS.WS);
 	}
 
 	if(opts.Strings != null && opts.Strings.length > 0) {
 		f = "xl/sharedStrings." + wbext;
-		zip.file(f, write_sst(opts.Strings, f, opts));
+        if(!isOverwritingSheets)
+            zip.file(f, write_sst(opts.Strings, f, opts));
 		ct.strs.push(f);
 		add_rels(opts.wbrels, ++rId, "sharedStrings." + wbext, RELS.SST);
 	}
@@ -11342,20 +11352,25 @@ function write_zip(wb, opts) {
 	/* TODO: something more intelligent with themes */
 
 	f = "xl/theme/theme1.xml";
-	zip.file(f, write_theme());
+    if(!isOverwritingSheets)
+        zip.file(f, write_theme());
 	ct.themes.push(f);
 	add_rels(opts.wbrels, ++rId, "theme/theme1.xml", RELS.THEME);
 
 	/* TODO: something more intelligent with styles */
 
 	f = "xl/styles." + wbext;
-	zip.file(f, write_sty(wb, f, opts));
+    if(!isOverwritingSheets)
+        zip.file(f, write_sty(wb, f, opts));
 	ct.styles.push(f);
 	add_rels(opts.wbrels, ++rId, "styles." + wbext, RELS.STY);
 
-	zip.file("[Content_Types].xml", write_ct(ct, opts));
-	zip.file('_rels/.rels', write_rels(opts.rels));
-	zip.file('xl/_rels/workbook.' + wbext + '.rels', write_rels(opts.wbrels));
+    if(!isOverwritingSheets){
+      zip.file("[Content_Types].xml", write_ct(ct, opts));
+      zip.file('_rels/.rels', write_rels(opts.rels));
+      zip.file('xl/_rels/workbook.' + wbext + '.rels', write_rels(opts.wbrels));
+    }
+
 	return zip;
 }
 function firstbyte(f,o) {
